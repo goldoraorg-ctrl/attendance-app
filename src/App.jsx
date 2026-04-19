@@ -6,120 +6,75 @@ import Dashboard from './pages/Dashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import History from './pages/History'
 
-const LOAD_TIMEOUT_MS = 5000
-
-async function fetchRoleWithTimeout(userId) {
-  const fetchPromise = supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userId)
-    .single()
-
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('role fetch timeout')), LOAD_TIMEOUT_MS)
-  )
-
-  const { data } = await Promise.race([fetchPromise, timeoutPromise])
-  return data?.role ?? 'employee'
-}
-
 export default function App() {
   const [session, setSession] = useState(null)
-  const [role, setRole]       = useState('employee')
+  const [role, setRole] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Hard timeout: never stay stuck on Loading longer than 5 seconds
-    const safetyTimer = setTimeout(() => setLoading(false), LOAD_TIMEOUT_MS)
-
-    supabase.auth.getSession()
-      .then(async ({ data: { session }, error }) => {
-        if (error) {
-          console.error('getSession error:', error.message)
-          return
-        }
-        setSession(session)
-        if (session) {
-          try {
-            const role = await fetchRoleWithTimeout(session.user.id)
-            setRole(role)
-          } catch (e) {
-            console.warn('Could not fetch role, defaulting to employee:', e.message)
-          }
-        }
-      })
-      .catch((e) => console.error('Unexpected auth error:', e.message))
-      .finally(() => {
-        clearTimeout(safetyTimer)
-        setLoading(false)
-      })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session)
-        if (session) {
-          try {
-            const role = await fetchRoleWithTimeout(session.user.id)
-            setRole(role)
-          } catch (e) {
-            console.warn('Could not fetch role on auth change, defaulting to employee:', e.message)
-            setRole('employee')
-          }
-        } else {
-          setRole('employee')
-        }
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setSession(session)
+      if (session) {
+        await fetchRole(session.user.id)
       }
-    )
-
-    return () => {
-      clearTimeout(safetyTimer)
-      subscription.unsubscribe()
+      setLoading(false)
     }
+    init()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setSession(session)
+      if (session) {
+        await fetchRole(session.user.id)
+      } else {
+        setRole(null)
+        setLoading(false)
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) return <div style={{ padding: '2rem' }}>Loading...</div>
+  const fetchRole = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single()
+      if (data) setRole(data.role)
+      else setRole('employee')
+    } catch {
+      setRole('employee')
+    }
+  }
 
-  const homeRoute = role === 'admin' ? '/admin' : '/dashboard'
+  if (loading) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
+      <p style={{ color: '#888' }}>Loading...</p>
+    </div>
+  )
+
+  const isAdmin = role === 'admin'
 
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public */}
-        <Route
-          path="/login"
-          element={!session ? <Login /> : <Navigate to={homeRoute} replace />}
-        />
-
-        {/* Employee only */}
-        <Route
-          path="/dashboard"
-          element={
-            !session            ? <Navigate to="/login"     replace /> :
-            role === 'admin'    ? <Navigate to="/admin"     replace /> :
-            <Dashboard session={session} />
-          }
-        />
-        <Route
-          path="/history"
-          element={
-            !session            ? <Navigate to="/login"     replace /> :
-            role === 'admin'    ? <Navigate to="/admin"     replace /> :
-            <History session={session} />
-          }
-        />
-
-        {/* Admin only */}
-        <Route
-          path="/admin"
-          element={
-            !session            ? <Navigate to="/login"     replace /> :
-            role !== 'admin'    ? <Navigate to="/dashboard" replace /> :
-            <AdminDashboard session={session} />
-          }
-        />
-
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to={session ? homeRoute : '/login'} replace />} />
+        <Route path="/login" element={
+          !session ? <Login /> : <Navigate to={isAdmin ? '/admin' : '/dashboard'} />
+        } />
+        <Route path="/dashboard" element={
+          !session ? <Navigate to="/login" /> : <Dashboard session={session} />
+        } />
+        <Route path="/admin" element={
+          !session ? <Navigate to="/login" /> : isAdmin ? <AdminDashboard session={session} /> : <Navigate to="/dashboard" />
+        } />
+        <Route path="/history" element={
+          !session ? <Navigate to="/login" /> : <History session={session} />
+        } />
+        <Route path="*" element={
+          <Navigate to={!session ? '/login' : isAdmin ? '/admin' : '/dashboard'} />
+        } />
       </Routes>
     </BrowserRouter>
   )
