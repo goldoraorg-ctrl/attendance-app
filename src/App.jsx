@@ -8,73 +8,38 @@ import History from './pages/History'
 
 export default function App() {
   const [session, setSession] = useState(null)
-  const [role, setRole] = useState(null)
+  const [role, setRole] = useState('employee')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session)
       if (session) {
-        await fetchRole(session.user.id)
+        const { data } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single()
+        setRole(data?.role ?? 'employee')
       }
       setLoading(false)
-    }
-    init()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session)
-      if (session) {
-        await fetchRole(session.user.id)
-      } else {
-        setRole(null)
-        setLoading(false)
-      }
     })
-
-    return () => subscription.unsubscribe()
   }, [])
 
-  const fetchRole = async (userId) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single()
-      if (data) setRole(data.role)
-      else setRole('employee')
-    } catch {
-      setRole('employee')
-    }
-  }
-
   if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
-      <p style={{ color: '#888' }}>Loading...</p>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <p>Loading...</p>
     </div>
   )
-
-  const isAdmin = role === 'admin'
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={
-          !session ? <Login /> : <Navigate to={isAdmin ? '/admin' : '/dashboard'} />
-        } />
-        <Route path="/dashboard" element={
-          !session ? <Navigate to="/login" /> : <Dashboard session={session} />
-        } />
-        <Route path="/admin" element={
-          !session ? <Navigate to="/login" /> : isAdmin ? <AdminDashboard session={session} /> : <Navigate to="/dashboard" />
-        } />
-        <Route path="/history" element={
-          !session ? <Navigate to="/login" /> : <History session={session} />
-        } />
-        <Route path="*" element={
-          <Navigate to={!session ? '/login' : isAdmin ? '/admin' : '/dashboard'} />
-        } />
+        <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
+        <Route path="/dashboard" element={session ? <Dashboard session={session} /> : <Navigate to="/login" />} />
+        <Route path="/admin" element={session && role === 'admin' ? <AdminDashboard session={session} /> : <Navigate to="/login" />} />
+        <Route path="/history" element={session ? <History session={session} /> : <Navigate to="/login" />} />
+        <Route path="*" element={<Navigate to={session ? (role === 'admin' ? '/admin' : '/dashboard') : '/login'} />} />
       </Routes>
     </BrowserRouter>
   )
