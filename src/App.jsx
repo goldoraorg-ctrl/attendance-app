@@ -8,28 +8,80 @@ import History from './pages/History'
 
 export default function App() {
   const [session, setSession] = useState(null)
+  const [role, setRole]       = useState(null)   // 'admin' | 'employee' | null
   const [loading, setLoading] = useState(true)
 
+  const fetchRole = async (userId) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single()
+    setRole(data?.role ?? 'employee')
+  }
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session)
+      if (session) await fetchRole(session.user.id)
       setLoading(false)
     })
-    supabase.auth.onAuthStateChange((_event, session) => {
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session)
+      if (session) {
+        await fetchRole(session.user.id)
+      } else {
+        setRole(null)
+      }
     })
+
+    return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) return <div style={{padding:'2rem'}}>Loading...</div>
+  if (loading) return <div style={{ padding: '2rem' }}>Loading...</div>
+
+  const homeRoute = role === 'admin' ? '/admin' : '/dashboard'
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={!session ? <Login /> : <Navigate to="/dashboard" />} />
-        <Route path="/dashboard" element={session ? <Dashboard session={session} /> : <Navigate to="/login" />} />
-        <Route path="/admin"     element={session ? <AdminDashboard session={session} /> : <Navigate to="/login" />} />
-        <Route path="/history"   element={session ? <History session={session} /> : <Navigate to="/login" />} />
-        <Route path="*" element={<Navigate to={session ? "/dashboard" : "/login"} />} />
+        {/* Public */}
+        <Route
+          path="/login"
+          element={!session ? <Login /> : <Navigate to={homeRoute} replace />}
+        />
+
+        {/* Employee only */}
+        <Route
+          path="/dashboard"
+          element={
+            !session ? <Navigate to="/login" replace /> :
+            role === 'admin' ? <Navigate to="/admin" replace /> :
+            <Dashboard session={session} />
+          }
+        />
+        <Route
+          path="/history"
+          element={
+            !session ? <Navigate to="/login" replace /> :
+            role === 'admin' ? <Navigate to="/admin" replace /> :
+            <History session={session} />
+          }
+        />
+
+        {/* Admin only */}
+        <Route
+          path="/admin"
+          element={
+            !session ? <Navigate to="/login" replace /> :
+            role !== 'admin' ? <Navigate to="/dashboard" replace /> :
+            <AdminDashboard session={session} />
+          }
+        />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to={session ? homeRoute : '/login'} replace />} />
       </Routes>
     </BrowserRouter>
   )
