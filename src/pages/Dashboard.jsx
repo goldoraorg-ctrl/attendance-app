@@ -4,13 +4,13 @@ import { supabase } from '../supabaseClient'
 
 const OFFICE_LAT    = 24.7061345
 const OFFICE_LNG    = 46.6743753
-const OFFICE_RADIUS = 100
+const OFFICE_RADIUS = 100 // metres
 
 function getDistance(lat1, lng1, lat2, lng2) {
-  const R = 6371000
+  const R    = 6371000
   const dLat = (lat2 - lat1) * Math.PI / 180
   const dLng = (lng2 - lng1) * Math.PI / 180
-  const a =
+  const a    =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLng / 2) * Math.sin(dLng / 2)
@@ -18,21 +18,16 @@ function getDistance(lat1, lng1, lat2, lng2) {
 }
 
 export default function Dashboard({ session }) {
-  const [attendance, setAttendance]     = useState(null)
-  const [status, setStatus]             = useState('Initializing location...')
-  const [insideOffice, setInsideOffice] = useState(false)
-  const [distance, setDistance]         = useState(null)
-  const [loading, setLoading]           = useState(true)
-  const intervalRef                     = useRef(null)
-  const navigate                        = useNavigate()
-  const today                           = new Date().toISOString().split('T')[0]
+  const [attendance,    setAttendance]    = useState(null)
+  const [status,        setStatus]        = useState('Initializing location...')
+  const [insideOffice,  setInsideOffice]  = useState(false)
+  const [distance,      setDistance]      = useState(null)
+  const [loading,       setLoading]       = useState(true)
+  const intervalRef = useRef(null)
+  const navigate    = useNavigate()
+  const today       = new Date().toISOString().split('T')[0]
 
-  useEffect(() => {
-    fetchTodayAttendance().then(() => checkLocation())
-    intervalRef.current = setInterval(checkLocation, 3 * 60 * 1000)
-    return () => clearInterval(intervalRef.current)
-  }, [])
-
+  // ── Fetch today's record ──────────────────────────────────────────────────
   const fetchTodayAttendance = async () => {
     const { data } = await supabase
       .from('attendance')
@@ -41,46 +36,11 @@ export default function Dashboard({ session }) {
       .eq('date', today)
       .single()
     setAttendance(data ?? null)
-    setLoading(false)
     return data ?? null
   }
 
-  const checkLocation = () => {
-    setStatus('Checking your location...')
-    if (!navigator.geolocation) {
-      setStatus('Geolocation is not supported by your browser.')
-      return
-    }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords
-        const dist = getDistance(latitude, longitude, OFFICE_LAT, OFFICE_LNG)
-        const rounded = Math.round(dist)
-        setDistance(rounded)
-
-        if (dist <= OFFICE_RADIUS) {
-          setInsideOffice(true)
-          setStatus('You are inside the office')
-          await handleAutoCheckIn(latitude, longitude)
-        } else {
-          setInsideOffice(false)
-          setStatus(`You are ${rounded}m away from the office`)
-          await handleAutoCheckOut()
-        }
-      },
-      (err) => {
-        const msgs = {
-          1: 'Location access denied. Please allow location in your browser settings.',
-          2: 'Location unavailable. Please try again.',
-          3: 'Location request timed out. Please try again.',
-        }
-        setStatus(msgs[err.code] || 'Could not get location.')
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    )
-  }
-
-  const handleAutoCheckIn = async (lat, lng) => {
+  // ── Auto check-in (only if no record exists today) ───────────────────────
+  const autoCheckIn = async (lat, lng) => {
     const { data: existing } = await supabase
       .from('attendance')
       .select('id')
@@ -98,7 +58,8 @@ export default function Dashboard({ session }) {
     await fetchTodayAttendance()
   }
 
-  const handleAutoCheckOut = async () => {
+  // ── Auto check-out (only if checked in but not yet checked out) ──────────
+  const autoCheckOut = async () => {
     const { data: existing } = await supabase
       .from('attendance')
       .select('*')
@@ -115,6 +76,52 @@ export default function Dashboard({ session }) {
     await fetchTodayAttendance()
   }
 
+  // ── Single location check ─────────────────────────────────────────────────
+  const checkLocation = () => {
+    if (!navigator.geolocation) {
+      setStatus('Geolocation is not supported by your browser.')
+      return
+    }
+    setStatus('Checking your location...')
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords
+        const dist    = getDistance(latitude, longitude, OFFICE_LAT, OFFICE_LNG)
+        const rounded = Math.round(dist)
+        setDistance(rounded)
+
+        if (dist <= OFFICE_RADIUS) {
+          setInsideOffice(true)
+          setStatus('You are inside the office')
+          await autoCheckIn(latitude, longitude)
+        } else {
+          setInsideOffice(false)
+          setStatus(`You are ${rounded}m away from the office`)
+          await autoCheckOut()
+        }
+      },
+      (err) => {
+        const messages = {
+          1: 'Location access denied. Please allow location in your browser settings.',
+          2: 'Location unavailable. Please try again.',
+          3: 'Location request timed out. Please try again.',
+        }
+        setStatus(messages[err.code] ?? 'Could not get location.')
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  // ── Mount: fetch record → check location → start interval ────────────────
+  useEffect(() => {
+    fetchTodayAttendance().then(() => {
+      setLoading(false)
+      checkLocation()
+    })
+    intervalRef.current = setInterval(checkLocation, 3 * 60 * 1000)
+    return () => clearInterval(intervalRef.current)
+  }, [])
+
   const handleLogout = async () => {
     clearInterval(intervalRef.current)
     await supabase.auth.signOut()
@@ -129,25 +136,26 @@ export default function Dashboard({ session }) {
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
           <h2 style={{ margin: 0 }}>My Attendance</h2>
-          <button onClick={handleLogout}
-            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #ddd', cursor: 'pointer', background: 'white' }}>
+          <button
+            onClick={handleLogout}
+            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #ddd', background: 'white', cursor: 'pointer' }}>
             Logout
           </button>
         </div>
 
-        {/* Main card */}
+        {/* Card */}
         <div style={{ background: 'white', borderRadius: '12px', padding: '2rem', textAlign: 'center', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
           <p style={{ color: '#888', marginBottom: '4px' }}>{new Date().toDateString()}</p>
           <p style={{ fontSize: '14px', color: '#555', marginBottom: '1.5rem' }}>{session.user.email}</p>
 
-          {/* Location status banner */}
+          {/* Location banner */}
           <div style={{
-            background: insideOffice ? '#E1F5EE' : '#FFF3E0',
-            borderRadius: '8px',
-            padding: '12px 16px',
-            marginBottom: '1.5rem',
+            background:    insideOffice ? '#E1F5EE' : '#FFF3E0',
+            borderRadius:  '8px',
+            padding:       '12px 16px',
+            marginBottom:  '1.5rem',
           }}>
-            <p style={{ margin: 0, fontWeight: '500', color: insideOffice ? '#085041' : '#E65100', fontSize: '14px' }}>
+            <p style={{ margin: 0, fontWeight: '500', fontSize: '14px', color: insideOffice ? '#085041' : '#E65100' }}>
               {status}
             </p>
             {distance !== null && (
@@ -161,7 +169,9 @@ export default function Dashboard({ session }) {
           {!attendance && (
             <>
               <div style={{ fontSize: '48px', marginBottom: '0.75rem' }}>🟡</div>
-              <p style={{ color: '#888', margin: 0 }}>Not checked in — move within {OFFICE_RADIUS}m of the office to auto check-in</p>
+              <p style={{ color: '#888', margin: 0 }}>
+                Not checked in — move within {OFFICE_RADIUS}m of the office to auto check-in
+              </p>
             </>
           )}
 
@@ -169,7 +179,9 @@ export default function Dashboard({ session }) {
             <>
               <div style={{ fontSize: '48px', marginBottom: '0.75rem' }}>🟢</div>
               <p style={{ color: '#1D9E75', fontWeight: '600', marginBottom: '4px' }}>Checked In</p>
-              <p style={{ color: '#888', margin: 0 }}>Since: {new Date(attendance.check_in_time).toLocaleTimeString()}</p>
+              <p style={{ color: '#888', margin: 0 }}>
+                Since: {new Date(attendance.check_in_time).toLocaleTimeString()}
+              </p>
             </>
           )}
 
@@ -177,21 +189,27 @@ export default function Dashboard({ session }) {
             <>
               <div style={{ fontSize: '48px', marginBottom: '0.75rem' }}>✅</div>
               <p style={{ color: '#555', fontWeight: '600', marginBottom: '8px' }}>Day Complete</p>
-              <p style={{ color: '#888', margin: '2px 0' }}>In: &nbsp;{new Date(attendance.check_in_time).toLocaleTimeString()}</p>
-              <p style={{ color: '#888', margin: '2px 0' }}>Out: {new Date(attendance.check_out_time).toLocaleTimeString()}</p>
+              <p style={{ color: '#888', margin: '2px 0' }}>
+                In: &nbsp;{new Date(attendance.check_in_time).toLocaleTimeString()}
+              </p>
+              <p style={{ color: '#888', margin: '2px 0' }}>
+                Out: {new Date(attendance.check_out_time).toLocaleTimeString()}
+              </p>
               <p style={{ fontSize: '26px', fontWeight: '600', color: '#1D9E75', marginTop: '0.75rem' }}>
                 {attendance.total_hours}h
               </p>
             </>
           )}
 
-          {/* Action buttons */}
+          {/* Buttons */}
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '1.75rem' }}>
-            <button onClick={checkLocation}
+            <button
+              onClick={checkLocation}
               style={{ padding: '10px 22px', borderRadius: '8px', border: '1px solid #ddd', background: 'white', cursor: 'pointer', fontSize: '14px' }}>
               Refresh Location
             </button>
-            <button onClick={() => navigate('/history')}
+            <button
+              onClick={() => navigate('/history')}
               style={{ padding: '10px 22px', borderRadius: '8px', border: '1px solid #1D9E75', color: '#1D9E75', background: 'white', cursor: 'pointer', fontSize: '14px' }}>
               View My History
             </button>
