@@ -35,19 +35,19 @@ export default function Login() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5' }}>
       <div style={{ background: 'white', padding: '2rem', borderRadius: '12px', width: '360px', boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }}>
-        <h2 style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Employee Login</h2>
-        {error && <p style={{ color: 'red', marginBottom: '1rem' }}>{error}</p>}
+        <h2 style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Login</h2>
+        {error && <p style={{ color: 'red', marginBottom: '1rem', textAlign: 'center' }}>{error}</p>}
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom: '1rem' }}>
-            <label>Email</label>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Email</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              style={{ width: '100%', padding: '8px', marginTop: '4px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box', fontSize: '14px' }}
               required />
           </div>
           <div style={{ marginBottom: '1.5rem' }}>
-            <label>Password</label>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-              style={{ width: '100%', padding: '8px', marginTop: '4px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box', fontSize: '14px' }}
               required />
           </div>
           <button type="submit" disabled={loading}
