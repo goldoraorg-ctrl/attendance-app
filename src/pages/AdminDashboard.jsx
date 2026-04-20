@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../supabaseClient'
 
 const EMPTY_FORM = { full_name: '', email: '', password: '', department: '' }
@@ -164,6 +165,9 @@ export default function AdminDashboard({ session }) {
   const [refreshing,    setRefreshing]    = useState(false)
   const [showModal,     setShowModal]     = useState(false)
   const [successMsg,    setSuccessMsg]    = useState('')
+  const [exporting,     setExporting]     = useState(false)
+  const [fromDate,      setFromDate]      = useState('')
+  const [toDate,        setToDate]        = useState('')
   const today = new Date().toISOString().split('T')[0]
 
   const fetchData = useCallback(async (isRefresh = false) => {
@@ -196,6 +200,42 @@ export default function AdminDashboard({ session }) {
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    let query = supabase
+      .from('attendance')
+      .select('*, profiles(full_name, department)')
+      .order('date', { ascending: true })
+    if (fromDate) query = query.gte('date', fromDate)
+    if (toDate)   query = query.lte('date', toDate)
+
+    const { data, error } = await query
+    if (error) {
+      alert('Export failed: ' + error.message)
+      setExporting(false)
+      return
+    }
+
+    const fmtT = (iso) =>
+      iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+
+    const rows = (data || []).map(r => ({
+      'Employee Name': r.profiles?.full_name || '',
+      'Department':    r.profiles?.department || '',
+      'Date':          r.date || '',
+      'Check-in Time': fmtT(r.check_in_time),
+      'Check-out Time': fmtT(r.check_out_time),
+      'Total Hours':   r.total_hours ?? '',
+      'Status':        r.check_out_time ? 'OUT' : r.check_in_time ? 'IN' : 'Absent',
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance')
+    XLSX.writeFile(wb, `attendance-report-${today}.xlsx`)
+    setExporting(false)
   }
 
   if (loading) return <div style={{ padding: '2rem' }}>Loading...</div>
@@ -236,14 +276,33 @@ export default function AdminDashboard({ session }) {
       <div style={{ maxWidth: '980px', margin: '0 auto' }}>
 
         {/* ── Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.75rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.75rem', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h2 style={{ margin: 0 }}>Admin Dashboard</h2>
             <p style={{ margin: '4px 0 0', color: '#888', fontSize: '14px' }}>
               {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <input
+                type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: '7px', border: '1px solid #ddd', fontSize: '13px', cursor: 'pointer' }} />
+              <span style={{ fontSize: '13px', color: '#888' }}>to</span>
+              <input
+                type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: '7px', border: '1px solid #ddd', fontSize: '13px', cursor: 'pointer' }} />
+            </div>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              style={{
+                padding: '9px 18px', borderRadius: '7px', border: 'none',
+                background: exporting ? '#a8d5c2' : '#1D9E75', color: 'white',
+                fontSize: '14px', fontWeight: '600', cursor: exporting ? 'not-allowed' : 'pointer',
+              }}>
+              {exporting ? 'Exporting...' : 'Export to Excel'}
+            </button>
             <button
               onClick={() => setShowModal(true)}
               style={{
